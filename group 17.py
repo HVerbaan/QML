@@ -1,7 +1,3 @@
-#================================================================================
-#Bilge Atasoy
-#==================================================================================================
-
 
 from gurobipy import *
 import numpy as np
@@ -14,8 +10,10 @@ import matplotlib.pyplot as plt
 #import os
 #os.environ["PATH"] += os.pathsep + '/Library/TeX/texbin'
 
-#============================================MODEL DATA============================================
+## Create optimization model
+m = Model('TSPmodel')
 
+#---Extraction of data---
 with open("data_small.txt", "r") as f:          # Open Li & Lim PDPTW instance definitions
     data = f.readlines()                        # Extract instance definitions
 
@@ -28,101 +26,93 @@ for line in data:
     TSP.append(words)                           # Store node data
 TSP = np.array(TSP)
 
+#---Sets---
+V= 4                                            # Vehicles
+H=TSP[:,0]                                      # Nodes
+N=len(TSP[:,0])                                        # Number of nodes
+#---Parameters---
 
-V=TSP[:,0]                                      # Nodes
-n=len(V)                                        # Number of nodes
+xc=TSP[:,1]                                     # X-position of nodes i
+yc=TSP[:,2]                                     # Y-position of nodes i
+pickup_demand=TSP[:,3] #something
+earliest_pickup=TSP[:,4] #time
+latest_pickup=TSP[:,5] #time
+service_time=TSP[:,6] #time
+allowed_charging=TSP[:,7] #binary
 
-xc=TSP[:,1]                                     # X-position of nodes
-yc=TSP[:,2]                                     # Y-position of nodes
-# the remainder of the data file is not used yet 
+# Calculation of the euclidean distance
+distance=np.zeros((n,n))                               # Create array for distance between nodes
+for i in H:
+    for j in H:
+        distance[i][j]=math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2) # Store distance between nodes
 
-
-t=np.zeros((n,n))                               # Create array for distance between nodes
-for i in V:
-    for j in V:
-        t[i][j]=math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2) # Store distance between nodes
-
-
-"""
-Description of content in the provided file: 
-
-    LOC_ID: ID number for a location; the first row represents the depot
-    XCOORD: x coordinates of the location
-    YCOORD: y coordinates of the location
-    DEMAND: volume to be picked up at each location (for the depot: zero)
-    READYTIME: earliest time for the start of pickup (for the depot: opening time)
-    DUETIME: latest time for the start of pickup (for the depot: closing time)
-    SERVICETIME: time needed for a pickup at the location
-    CHARGING: 1 if there is a charging possibility at the location; 0 otherwise.
-
-"""
-
-
-# ---- Parameters ----
-
-vehicles = 4
-
- 
-# Node characteristics
-
-distance = 
-travel_time = 
-service_time = 
-allowed_charging = 
-
-# Vehicle characteristics
-
-load_capacity = 
-battery_capacity =          # Per vehicle in next part?
-
-# Battery characteristics
-
-discharge_rate = 
-charge_rate = 
+charge= 1
+discharge= 1
+travel_time= distance * 2 
+maximum_loading=120
+maximum_battery=110
+amount_vehicles=4
+big_m=1000
 
 
-
-
-M = 2500
-
-# ---- Sets ----
-
-N = range (len (energytypes))              # set of energy types
-V = range (vehicles)             # set of vehicles
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#========================================OPTIMIZATION MODEL========================================
-
-
-## Create optimization model
-m = Model('TSPmodel')
-
-## Create Decision Variables
-#arcs - if  arc(i,j) is visited it is 1
+#---Variables---
+#Variable 1: binary variable if it in the solution space
 x = {}
-for i in V:
-    for j in V:
-        x[i,j] = m.addVar(vtype=GRB.BINARY, lb = 0, name="X_%s,%s" %(i,j))
-      
-#order for subtour elimination
-u = {}
-for i in V:
-    u[i] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="W_%s" %(i))        
+for i in H:
+    for j in H:
+        for v in V:
+            x[i,j,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="X_%s,%s,%s" %(i,j,v))
 
+u = {}
+for i in H:
+        u[i] = m.addVar(vtype=GRB.BINARY, lb = 0, name="U_%s" %(i))
+
+z = {}
+for i in H:
+    for v in V:
+        z[i,v] = m.addVar(vtype=GRB.BINARY, lb=0, name="Z_%s,%s" %(i,v))
+      
+w = {}
+for i in H:
+    for v in V:
+        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="W_%s,%s" %(i,v))
+
+q = {}
+for i in H:
+    for v in V:
+        q[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
+
+
+cb = {}
+for i in H:
+    for v in V:
+        cb[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cb_%s,%s" %(i,v))
+
+cl = {}
+for i in H:
+    for v in V:
+        cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cl_%s,%s" %(i,v))
+  
+
+#---Objective---
+obj = (quicksum(d[i,j]*x[i,j,v] for i in H for j in H for v in V))
+m.setObjective(obj, GRB.MINIMIZE)
+
+
+
+#======================Continue Here!!!!!!!=============
+
+#---Constraints---  
+# All locations should be visited
+for i in V:
+    m.addConstr(quicksum(x[i,j] for j in V) == 1, name='Visit_%s' % (i))
+for j in V:
+    m.addConstr(quicksum(x[i,j] for i in V) == 1, name='Visit_%s' % (i))
+       
+#Objective 
+
+
+print(H)
 ## Objective
 obj = (quicksum(t[i,j]*x[i,j] for i in V for j in V))
 m.setObjective(obj, GRB.MINIMIZE)
