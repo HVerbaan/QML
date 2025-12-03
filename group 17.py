@@ -1,3 +1,10 @@
+#=================================================================================
+# Group 17
+#===============================================================
+
+
+
+#----------------Imports--------------------------------
 
 from gurobipy import *
 import numpy as np
@@ -10,115 +17,141 @@ import matplotlib.pyplot as plt
 #import os
 #os.environ["PATH"] += os.pathsep + '/Library/TeX/texbin'
 
+
 ## Create optimization model
 m = Model('TSPmodel')
 
-#---Extraction of data---
+
+#---------------Extraction of data---------------------------
+
 with open("data_small.txt", "r") as f:          # Open Li & Lim PDPTW instance definitions
     data = f.readlines()                        # Extract instance definitions
 
 TSP = []                                        # Create array for data related to nodes
-i=0                                             # Varible to keep track of lines in data file
+i = 0                                           # Varible to keep track of lines in data file
 for line in data:
-    i=i+1
+    i = i+1
     words = line.split()
-    words=[int(i) for i in words]               # Covert data from string to integer
+    words = [int(i) for i in words]             # Covert data from string to integer
     TSP.append(words)                           # Store node data
 TSP = np.array(TSP)
 
-#---Sets---
-V= 4                                            # Vehicles
-H=TSP[:,0]                                      # Nodes
-N=len(TSP[:,0])                                        # Number of nodes
-#---Parameters---
 
-xc=TSP[:,1]                                     # X-position of nodes i
-yc=TSP[:,2]                                     # Y-position of nodes i
-pickup_demand=TSP[:,3] #something
-earliest_pickup=TSP[:,4] #time
-latest_pickup=TSP[:,5] #time
-service_time=TSP[:,6] #time
-allowed_charging=TSP[:,7] #binary
+#---------------Sets----------------------
 
-# Calculation of the euclidean distance
-distance=np.zeros((n,n))                               # Create array for distance between nodes
+V = 4                                           # Number of vehicles
+H = TSP[:,0]                                    # List of all nodes
+N = len(TSP[:,0])                               # Number of nodes
+
+
+#---------------Parameters----------------
+
+# Node specific
+xc = TSP[:,1]                                   # X-position of nodes i
+yc = TSP[:,2]                                   # Y-position of nodes i
+pickup_demand = TSP[:,3]                        # Demand at the node
+earliest_pickup = TSP[:,4]                      # Opening time of node i
+latest_pickup = TSP[:,5]                        # Closing time of node i
+service_time = TSP[:,6]                         # Service time required in node i
+allowed_charging = TSP[:,7]                     # Charging at node i - binary variable (0 for no charging; 1 for available charging)
+
+
+# Calculation of the euclidean distance per node 
+distance=np.zeros((n,n))                                                         # Create array for distance between nodes
 for i in H:
     for j in H:
-        distance[i][j]=math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2) # Store distance between nodes
-
-charge= 1
-discharge= 1
-travel_time= distance * 2 
-maximum_loading=120
-maximum_battery=110
-amount_vehicles=4
-big_m=1000
+        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Store distance between nodes
 
 
-#---Variables---
-#Variable 1: binary variable if it in the solution space
+# Vehicle + Battery specific
+charge = 1                                       # Charging rate of the battery in vehicle
+discharge = 1                                    # Discharging rate of the battery in vehicle
+travel_time = distance * 2                       # Travel cost from node i to node j
+maximum_loading = 120                            # Maximum loading capacity of vehicle v (currently single type)
+maximum_battery = 110                            # Maximum battery capacity of vehicle v
+amount_vehicles = V
+
+
+# Additional parameters
+big_m = 1000                                    # Used for the Big M method
+
+
+#---------------------Variables-------------------------------
+
+# Variable 1 - Binary variable for the route (i, j) being in the solution space for vehicle v 
 x = {}
 for i in H:
     for j in H:
         for v in V:
             x[i,j,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="X_%s,%s,%s" %(i,j,v))
 
+
+# Variable 2 - Order of the nodes in solution space of the route per vehicle
 u = {}
 for i in H:
-        u[i] = m.addVar(vtype=GRB.BINARY, lb = 0, name="U_%s" %(i))
+    for v in V:
+        u[i,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="U_%s_%s" %(i.v))
 
+# Variable 3 - Binary variable for if the node is visited by a vehicle or not 
 z = {}
 for i in H:
     for v in V:
         z[i,v] = m.addVar(vtype=GRB.BINARY, lb=0, name="Z_%s,%s" %(i,v))
       
+# Variable 4 - Arrival time of vehicle v at node i
 w = {}
 for i in H:
     for v in V:
         w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="W_%s,%s" %(i,v))
 
+# Variable 5 - Amount of energy charged by vehicle v at node i
 q = {}
 for i in H:
     for v in V:
         q[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
 
-
+# Variable 6 - Battery level of vehicle v at node i
 cb = {}
 for i in H:
     for v in V:
         cb[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cb_%s,%s" %(i,v))
 
+# Variable 7 - Load volume of vehicle v after visiting node i
 cl = {}
 for i in H:
     for v in V:
         cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cl_%s,%s" %(i,v))
   
 
-#---Objective---
+#-------------------Objective-------------------------------
+
 obj = (quicksum(d[i,j]*x[i,j,v] for i in H for j in H for v in V))
 m.setObjective(obj, GRB.MINIMIZE)
 
 
+#------------------Constraints-------------------------------  
+
+# Constraint 1 - All locations should be visited once
+for i in N:
+    m.addConstr(quicksum(x[i,j] for j in N) == 1, name='Visit_%s' % (i))
+for j in N:
+    m.addConstr(quicksum(x[i,j] for i in N) == 1, name='Visit_%s' % (i))
+
+# Constraint 2 - Each customer node is visited by one vehicle
+for i in N:
+    for v in V:
+        m.addConstr(quicksum(x[i,v]) == 1, name='Visit_%s' % (i))
+
 
 #======================Continue Here!!!!!!!=============
 
-#---Constraints---  
-# All locations should be visited
-for i in V:
-    m.addConstr(quicksum(x[i,j] for j in V) == 1, name='Visit_%s' % (i))
-for j in V:
-    m.addConstr(quicksum(x[i,j] for i in V) == 1, name='Visit_%s' % (i))
        
-#Objective 
-
-
-print(H)
 ## Objective
 obj = (quicksum(t[i,j]*x[i,j] for i in V for j in V))
 m.setObjective(obj, GRB.MINIMIZE)
 
-# Constraints    
-# All locations should be visited
+#---------------------Constraints------------------------------ 
+# Constraint 1 - All locations should be visited
 for i in V:
     m.addConstr(quicksum(x[i,j] for j in V) == 1, name='Visit_%s' % (i))
 for j in V:
