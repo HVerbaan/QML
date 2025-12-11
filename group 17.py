@@ -24,7 +24,10 @@ m = Model('TSPmodel')
 
 #---------------Extraction of data---------------------------
 
-with open("data_small.txt", "r") as f:          # Open Li & Lim PDPTW instance definitions
+# filename = "data_small.txt"
+filename = r"C:\Users\annav\OneDrive\Documenten\Anna\Studie\Quantitative methods for logistics\Assignment_Q2\data_small.txt"
+
+with open(filename, "r") as f:          # Open Li & Lim PDPTW instance definitions
     data = f.readlines()                        # Extract instance definitions
 
 TSP = []                                        # Create array for data related to nodes
@@ -37,112 +40,200 @@ for line in data:
 TSP = np.array(TSP)
 
 
-#---------------Sets----------------------
 
-V = 4                                           # Number of vehicles
-H = TSP[:,0]                                    # List of all nodes
-N = len(TSP[:,0])                               # Number of nodes
-
+#%%
 
 #---------------Parameters----------------
 
-# Node specific
+# Node specific (from datafile)
+node_id = TSP[:,0]                              # List of id's of nodes i
 xc = TSP[:,1]                                   # X-position of nodes i
 yc = TSP[:,2]                                   # Y-position of nodes i
-pickup_demand = TSP[:,3]                        # Demand at the node
+pickup_volume = TSP[:,3]                        # Amount to be picked up at node i
 earliest_pickup = TSP[:,4]                      # Opening time of node i
 latest_pickup = TSP[:,5]                        # Closing time of node i
 service_time = TSP[:,6]                         # Service time required in node i
 allowed_charging = TSP[:,7]                     # Charging at node i - binary variable (0 for no charging; 1 for available charging)
 
 
-# Calculation of the euclidean distance per node 
+# Calculation of the euclidean distance between two nodes 
+n = len(xc)
 distance=np.zeros((n,n))                                                         # Create array for distance between nodes
-for i in H:
-    for j in H:
+for i in node_id:
+    for j in node_id:
         distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Store distance between nodes
 
 
-# Vehicle + Battery specific
+# Vehicle + Battery specific (choose)
 charge = 1                                       # Charging rate of the battery in vehicle
 discharge = 1                                    # Discharging rate of the battery in vehicle
 travel_time = distance * 2                       # Travel cost from node i to node j
 maximum_loading = 120                            # Maximum loading capacity of vehicle v (currently single type)
 maximum_battery = 110                            # Maximum battery capacity of vehicle v
-amount_vehicles = V
+K = 4                                            # Amount of vehicles in fleet
 
 
 # Additional parameters
-big_m = 1000                                    # Used for the Big M method
+H = latest_pickup[0] - earliest_pickup[0]       # Operation horizon (opening hours  of the depot node)
+ML = maximum_loading                            # Big-M for pick up constraint
+MC = H                                          # Big-M for charging time constraint
+MB = maximum_battery + discharge*H              # Big-M for battery constraint
+
+MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
+for i in node_id:
+    for j in node_id:
+        MT[i,j] = latest_pickup + H + travel_time - earliest_pickup     
+
+
+#---------------Sets----------------------
+
+V = range(K)                                    # Set of vehicles
+N = node_id                                     # Set of all nodes
 
 
 #---------------------Variables-------------------------------
 
 # Variable 1 - Binary variable for the route (i, j) being in the solution space for vehicle v 
 x = {}
-for i in H:
-    for j in H:
+for i in N:
+    for j in N:
         for v in V:
             x[i,j,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="X_%s,%s,%s" %(i,j,v))
 
 
-# Variable 2 - Order of the nodes in solution space of the route per vehicle
-u = {}
-for i in H:
-    for v in V:
-        u[i,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="U_%s_%s" %(i.v))
-
-# Variable 3 - Binary variable for if the node is visited by a vehicle or not 
+# Variable 2 - Binary variable for if node i is visited by a vehicle or not 
 z = {}
-for i in H:
+for i in N:
     for v in V:
         z[i,v] = m.addVar(vtype=GRB.BINARY, lb=0, name="Z_%s,%s" %(i,v))
       
-# Variable 4 - Arrival time of vehicle v at node i
+# Variable 3 - Arrival time of vehicle v at node i
+a = {}
+for i in N:
+    for v in V:
+        a[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="W_%s,%s" %(i,v))
+        
+# Variable 4 - Start time of service of vehicle v at node i
 w = {}
-for i in H:
+for i in N:
     for v in V:
-        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="W_%s,%s" %(i,v))
+        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=earliest_pickup,
+                          ub=latest_pickup, name="W_%s,%s" %(i,v))
 
-# Variable 5 - Amount of energy charged by vehicle v at node i
-q = {}
-for i in H:
+# Variable 5 - Total time spent at node i by vehicle v
+alpha = {}
+for i in N:
     for v in V:
-        q[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
+        alpha[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
 
-# Variable 6 - Battery level of vehicle v at node i
+# Variable 6 - Time spent charging at node i by vehicle v
+beta = {}
+for i in N:
+    for v in V:
+        beta[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
+
+# Variable 7 - Battery level of vehicle v at node i
 cb = {}
-for i in H:
+for i in N:
     for v in V:
         cb[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cb_%s,%s" %(i,v))
 
-# Variable 7 - Load volume of vehicle v after visiting node i
+# Variable 8 - Load volume of vehicle v after visiting node i
 cl = {}
-for i in H:
+for i in N:
     for v in V:
         cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cl_%s,%s" %(i,v))
   
 
 #-------------------Objective-------------------------------
 
-obj = (quicksum(d[i,j]*x[i,j,v] for i in H for j in H for v in V))
+obj = (quicksum(d[i,j]*x[i,j,v] for i in N for j in N for v in V))
 m.setObjective(obj, GRB.MINIMIZE)
 
 
 #------------------Constraints-------------------------------  
 
-# Constraint 1 - All locations should be visited once
+## Constraints for tours:
+
+# Constraint 1 - Each node only one outgoing arc
+for v in V:
+    for i in N:
+        m.addConstr(quicksum(x[i,j,v] for j in N if j != i) == z[i,v], 
+                    name=f"flow_out_{i}_{v}")
+
+# Constraint 2 - Each node only one incoming arc
+for v in V:
+    for j in N:
+        m.addConstr(
+            quicksum(x[i,j,v] for i in N if i != j) == z[j,v],
+            name=f"flow_in_{j}_{v}")
+        
+# Constraint 3 - Visit all nodes except the depot exactly one time
 for i in N:
-    m.addConstr(quicksum(x[i,j] for j in N) == 1, name='Visit_%s' % (i))
-for j in N:
-    m.addConstr(quicksum(x[i,j] for i in N) == 1, name='Visit_%s' % (i))
+    if i != 0:
+        m.addConstr(
+            quicksum(z[i,v] for v in V) == 1,
+            name=f"visit_once_{i}")
+        
+# Constraint 4 - Ensure correct outflow for depot node
+for v in V:
+    m.addConstr(
+        quicksum(x[0,j,v] for j in N if j != 0) == z[0,v],
+        name=f"depot_out_{v}"
+    )
+    
+# Constraint 5 - Ensure correct inflow for depot node
+for v in V:
+    m.addConstr(
+        quicksum(x[i,0,v] for i in N if i != 0) == z[0,v],
+        name=f"depot_in_{v}")
+    
+# Constraint 6 - Exactly K numer of vehicles leave the depot
+m.addConstr(
+    quicksum(x[0,j,v] for v in V for j in N if j != 0) == K,
+    name="depot_vehicle_count")
 
-# Constraint 2 - Each customer node is visited by one vehicle
-for i in N:
-    for v in V:
-        m.addConstr(quicksum(x[i,v]) == 1, name='Visit_%s' % (i))
+
+## Constraints for time:
+    
+# Constraint 7 - Service time starting after arrival time at node
+for v in V:
+    for i in N:
+        m.addConstr(a[i,v] <= w[i,v], name=f"service_time_{v}_at_{i}")
+
+# Constraint 8 - 
+for v in V:
+    for i in N:
+        m.addConstr(
+            w[i,v] + service_time[i]*z[i,v] <= a[i,v] + alpha[i,v], 
+            name=f"time_at_node_{i}_by_{v}")
+        
+# Constraint 9 - 
+for v in V:
+    for i in N:
+        m.addConstr(
+            beta[i,v] <= alpha[i,v], 
+            name=f"chargetime_at_{i}_by_{v}")
+
+# Constraint 10 -
+for v in V:
+    for i in N:
+        m.addConstr(
+            beta[i,v] <= MC * z[i,v], 
+            name=f"chargetime_no_node_{i}_by_{v}")
+
+# Constraint 11 -
+for v in V:
+    for i in N:
+        m.addConstr(
+            beta[i,v] <= MC * allowed_charging[i], 
+            name=f"chargestation_at_{i}_by_{v}")
 
 
+
+
+
+###OLD CODE FROM EXAMPLE: ###
 #======================Continue Here!!!!!!!=============
 
        
