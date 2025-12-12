@@ -310,10 +310,10 @@ for v in V:
 #------------------Running model-------------------------------   
 
 m.update()
-m.write('TSPmodel.lp')
+# m.write('TSPmodel.lp')
 m.Params.timeLimit = 3600
 m.optimize()
-m.write('TSPmodel.sol')
+# m.write('TSPmodel.sol')
 
 
 
