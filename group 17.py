@@ -24,8 +24,8 @@ m = Model('TSPmodel')
 
 #---------------Extraction of data---------------------------
 
-# filename = "data_small.txt"
-filename = r"C:\Users\annav\OneDrive\Documenten\Anna\Studie\Quantitative methods for logistics\Assignment_Q2\data_small.txt"
+filename = "data_small.txt"
+#filename = r"C:\Users\annav\OneDrive\Documenten\Anna\Studie\Quantitative methods for logistics\Assignment_Q2\data_small.txt"
 
 with open(filename, "r") as f:          # Open Li & Lim PDPTW instance definitions
     data = f.readlines()                        # Extract instance definitions
@@ -82,7 +82,7 @@ MB = maximum_battery + discharge*H              # Big-M for battery constraint
 MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
 for i in node_id:
     for j in node_id:
-        MT[i,j] = latest_pickup + H + travel_time - earliest_pickup     
+        MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]     
 
 
 #---------------Sets----------------------
@@ -117,8 +117,8 @@ for i in N:
 w = {}
 for i in N:
     for v in V:
-        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=earliest_pickup,
-                          ub=latest_pickup, name="W_%s,%s" %(i,v))
+        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=earliest_pickup[i],
+                          ub=latest_pickup[i], name="W_%s,%s" %(i,v))
 
 # Variable 5 - Total time spent at node i by vehicle v
 alpha = {}
@@ -130,7 +130,7 @@ for i in N:
 beta = {}
 for i in N:
     for v in V:
-        beta[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Q_%s,%s" %(i,v))
+        beta[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=maximum_battery, name="Q_%s,%s" %(i,v))
 
 # Variable 7 - Battery level of vehicle v at node i
 cb = {}
@@ -142,13 +142,15 @@ for i in N:
 cl = {}
 for i in N:
     for v in V:
-        cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cl_%s,%s" %(i,v))
+        cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=maximum_loading, name="Cl_%s,%s" %(i,v))
   
 
 #-------------------Objective-------------------------------
 
-obj = (quicksum(d[i,j]*x[i,j,v] for i in N for j in N for v in V))
+obj = (quicksum(distance[i,j]*x[i,j,v] for i in N for j in N for v in V))
 m.setObjective(obj, GRB.MINIMIZE)
+
+
 
 
 #------------------Constraints-------------------------------  
@@ -175,61 +177,143 @@ for i in N:
             quicksum(z[i,v] for v in V) == 1,
             name=f"visit_once_{i}")
         
-# Constraint 4 - Ensure correct outflow for depot node
+# Constraint 4 - N number of vehicles are allowed to leave the depot
 for v in V:
     m.addConstr(
-        quicksum(x[0,j,v] for j in N if j != 0) == z[0,v],
+        quicksum(z[0,v] for v in V) == K,
         name=f"depot_out_{v}"
     )
     
-# Constraint 5 - Ensure correct inflow for depot node
-for v in V:
-    m.addConstr(
-        quicksum(x[i,0,v] for i in N if i != 0) == z[0,v],
-        name=f"depot_in_{v}")
-    
-# Constraint 6 - Exactly K numer of vehicles leave the depot
-m.addConstr(
-    quicksum(x[0,j,v] for v in V for j in N if j != 0) == K,
-    name="depot_vehicle_count")
 
 
 ## Constraints for time:
     
-# Constraint 7 - Service time starting after arrival time at node
+# Constraint 5 - Service time starting after arrival time at node
 for v in V:
     for i in N:
         m.addConstr(a[i,v] <= w[i,v], name=f"service_time_{v}_at_{i}")
 
-# Constraint 8 - 
+# Constraint 6 - The vehicle doesn't stay for longer than the total time spent at the node
 for v in V:
     for i in N:
         m.addConstr(
             w[i,v] + service_time[i]*z[i,v] <= a[i,v] + alpha[i,v], 
             name=f"time_at_node_{i}_by_{v}")
         
-# Constraint 9 - 
+# Constraint 7 - Charging time is not longer than the total time spent at the node
 for v in V:
     for i in N:
         m.addConstr(
             beta[i,v] <= alpha[i,v], 
             name=f"chargetime_at_{i}_by_{v}")
 
-# Constraint 10 -
+# Constraint 8 - Charging time is positive only at nodes that are visited
 for v in V:
     for i in N:
         m.addConstr(
             beta[i,v] <= MC * z[i,v], 
             name=f"chargetime_no_node_{i}_by_{v}")
 
-# Constraint 11 -
+# Constraint 9 - Charging time is positive only at nodes that allow charging
 for v in V:
     for i in N:
         m.addConstr(
             beta[i,v] <= MC * allowed_charging[i], 
             name=f"chargestation_at_{i}_by_{v}")
 
+# Constraint 10 - Arrival time at node j cannot be earlier than the sum of arrival time at previous node and time spent there
+for v in V:
+    for i in N:
+        if i != j:
+            m.addConstr(
+                a[j,v] >= a[i,v] + alpha[i,v] + travel_time[i,j] - MT[i,j] * (1 - x[i,j,v]), 
+                name=f"chargestation_at_{i}_by_{v}")
+        
+        
+        
+## Constraints for battery        
+        
+# Constraint 11 - Full battery charge when starting at the depot
+for v in V:
+    m.addConstr(
+        cb[0,v] == maximum_battery, 
+        name=f"chargestation_at_{i}_by_{v}")
 
+# Constraint 12 - The vehicle needs enough charge to reach the next node before departure
+for v in V:
+    for i in N:
+        for j in N:
+            if i != j:
+                m.addConstr(
+                    cb[j,v] >= cb[i,v] - discharge * travel_time[i,j] + charge * beta[j,v] - MB * (1-x[i,j,v]), 
+                    name=f"chargestation_at_{i}_by_{v}")
+
+# Constraint 13 - The vehicle needs enough charge to reach the next node before departure
+for v in V:
+    for i in N:
+        for j in N:
+            if i != j:
+                m.addConstr(
+                    cb[j,v] <= cb[i,v] - discharge * travel_time[i,j] + charge * beta[j,v] + MB * (1-x[i,j,v]), 
+                    name=f"chargestation_at_{i}_by_{v}")
+        
+# Constraint 14 - Constraint for charging with respect to the maximum battery capacity
+for v in V:
+    for i in N:
+        m.addConstr(
+            cb[j,v] + discharge * travel_time[i,j] <= maximum_battery, 
+            name=f"chargestation_at_{i}_by_{v}")
+
+# Constraint 15 - Charge in the battery is sufficient to reach the next node
+for v in V:
+    for i in N:
+        if i != j:
+            m.addConstr(
+                cb[j,v] >= discharge * travel_time[i,j] * x[i,j,v], 
+                name=f"chargestation_at_{i}_by_{v}")
+
+
+## Constraints for vehicle
+
+# Constraint 16 - Load volume is 0 at depot 
+for v in V:
+    m.addConstr(
+        cl[0,v] == 0, 
+        name=f"volume_at_depot_by_{v}")
+    
+# Constraint 17 - The available storage in vehicle should be sufficient to pick up the load at node j
+for v in V:
+    for j in N:
+        for i in N:
+            if i != j:
+                m.addConstr(
+                    cl[j,v] >= cl[i,v] + pickup_volume[j] - ML * (1 - x[i,j,v]), 
+                    name=f"chargestation_at_{i}_by_{v}")   
+
+# Constraint 18 - The available storage in vehicle should be sufficient to pick up the load at node j
+for v in V:
+    for j in N:
+        for i in N:
+            if i != j:
+                m.addConstr(
+                    cl[j,v] <= cl[i,v] + pickup_volume[j] + ML * (1 - x[i,j,v]), 
+                    name=f"chargestation_at_{i}_by_{v}")  
+            
+# Constraint 19 - Volume after pickup does not exceed capacity
+for v in V:
+        for i in N:
+            m.addConstr(
+                quicksum(pickup_volume[i] * z[i,v] for i in N) <= maximum_loading,
+                name=f"chargestation_at_{i}_by_{v}")   
+    
+    
+#------------------Running model-------------------------------   
+
+m.update()
+m.write('TSPmodel.lp')
+m.Params.timeLimit = 3600
+m.optimize()
+m.write('TSPmodel.sol')
 
 
 
@@ -238,69 +322,69 @@ for v in V:
 
        
 ## Objective
-obj = (quicksum(t[i,j]*x[i,j] for i in V for j in V))
-m.setObjective(obj, GRB.MINIMIZE)
+#obj = (quicksum(t[i,j]*x[i,j] for i in V for j in V))
+#m.setObjective(obj, GRB.MINIMIZE)
 
 #---------------------Constraints------------------------------ 
 # Constraint 1 - All locations should be visited
-for i in V:
-    m.addConstr(quicksum(x[i,j] for j in V) == 1, name='Visit_%s' % (i))
-for j in V:
-    m.addConstr(quicksum(x[i,j] for i in V) == 1, name='Visit_%s' % (i))
+#for i in V:
+#    m.addConstr(quicksum(x[i,j] for j in V) == 1, name='Visit_%s' % (i))
+#for j in V:
+#    m.addConstr(quicksum(x[i,j] for i in V) == 1, name='Visit_%s' % (i))
        
 
 # #SUBTOUR ELIMINATION     
 # ##maximum and minimum values for each node except the start  
-m.addConstr(u[0] == 1) 
-for i in V: 
-    if i != 0:
-        m.addConstr(u[i] >= 2)
-        m.addConstr(u[i] <= len(V))
+#m.addConstr(u[0] == 1) 
+#for i in V: 
+#    if i != 0:
+#        m.addConstr(u[i] >= 2)
+#        m.addConstr(u[i] <= len(V))
 #the order of nodes based on the decision variables  
-for i in V:
-    for j in V:
-        if j!=0:
-            m.addConstr(u[i] - u[j] + (len(V)) * x[i,j] <= len(V)-1)       
+#for i in V:
+#    for j in V:
+#        if j!=0:
+#            m.addConstr(u[i] - u[j] + (len(V)) * x[i,j] <= len(V)-1)       
     
 # # No connection to the node itself
 # for i in V:
 #     m.addConstr(x[i,i],GRB.EQUAL,0,name='NoC_%s' % (i)) 
     
  
-m.update()
-m.write('TSPmodel.lp')
-m.Params.timeLimit = 3600
-m.optimize()
-m.write('TSPmodel.sol')
+#m.update()
+#m.write('TSPmodel.lp')
+#m.Params.timeLimit = 3600
+#m.optimize()
+#m.write('TSPmodel.sol')
 
 # Plot the routes that are decided to be traversed 
-arc_solution = m.getAttr('x', x)
+#arc_solution = m.getAttr('x', x)
 #
-fig= plt.figure(figsize=(15,15))
-plt.xlabel('x-coordinate')
-plt.ylabel('y-coordinate')
-plt.scatter(xc[1:n-1],yc[1:n-1])
-for i in range(1,n-1):
-    plt.annotate(str(i),(xc[i],yc[i]))
-plt.plot(xc[0],yc[0],c='g',marker='s')
+#fig= plt.figure(figsize=(15,15))
+#plt.xlabel('x-coordinate')
+#plt.ylabel('y-coordinate')
+#plt.scatter(xc[1:n-1],yc[1:n-1])
+#for i in range(1,n-1):
+#    plt.annotate(str(i),(xc[i],yc[i]))
+#plt.plot(xc[0],yc[0],c='g',marker='s')
 #
-for i in range(n):
-    for j in range(n):
-        if arc_solution[i,j] > 0.99:
-            plt.plot([xc[i], xc[j]], [yc[i], yc[j]],'r--')
-plt.show()          
+#for i in range(n):
+#    for j in range(n):
+#        if arc_solution[i,j] > 0.99:
+#            plt.plot([xc[i], xc[j]], [yc[i], yc[j]],'r--')
+#plt.show()          
 ##YOU CAN SAVE YOUR PLOTS SOMEWHERE IF YOU LIKE
 ##plt.savefig('Plots/TSP.png',bbox_inches='tight')   
 #
 
-for i in V:
-    print("ORDER OF NODE " , i, " IS " , u[i].X)
+#for i in V:
+#    print("ORDER OF NODE " , i, " IS " , u[i].X)
                            
 
-print('Obj: %g' % m.objVal)
+#print('Obj: %g' % m.objVal)
 
-Totaldistance = sum(t[i,j]*x[i,j].X for i in V for j in V)
+#Totaldistance = sum(t[i,j]*x[i,j].X for i in V for j in V)
 
-print('Total distance traveled: ', Totaldistance)
+#print('Total distance traveled: ', Totaldistance)
 
 
