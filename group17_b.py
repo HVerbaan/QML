@@ -74,16 +74,19 @@ K = 4                                            # Amount of vehicles in fleet
 
 
 # Additional parameters
-H = latest_pickup[0] - earliest_pickup[0]       # Operation horizon (opening hours  of the depot node)
-ML = maximum_loading                            # Big-M for pick up constraint
-MC = H                                          # Big-M for charging time constraint
+# H = latest_pickup[0] - earliest_pickup[0]       # Operation horizon (opening hours  of the depot node)
+# ML = maximum_loading                            # Big-M for pick up constraint
+ML = 3000
+# MC = H                                          # Big-M for charging time constraint
+MC = 3000
 # MB = maximum_battery + discharge*H              # Big-M for battery constraint
 MB = 3000 #CHAT
 
 MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
 for i in node_id:
     for j in node_id:
-        MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]     
+        MT[i,j] = 3000
+        # MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]     
 
 
 #---------------Sets----------------------
@@ -162,15 +165,37 @@ m.setObjective(obj, GRB.MINIMIZE)
 # Constraint 1 - Each node only one outgoing arc
 for v in V:
     for i in N:
-        m.addConstr(quicksum(x[i,j,v] for j in N if j != i) == z[i,v], 
-                    name=f"flow_out_{i}_{v}")
+        if i != 0:
+            m.addConstr(quicksum(x[i,j,v] for j in N if j != i) == z[i,v], 
+                        name=f"flow_out_{i}_{v}")
 
 # Constraint 2 - Each node only one incoming arc
 for v in V:
     for j in N:
-        m.addConstr(
-            quicksum(x[i,j,v] for i in N if i != j) == z[j,v],
-            name=f"flow_in_{j}_{v}")
+        if j != 0:
+            m.addConstr(
+                quicksum(x[i,j,v] for i in N if i != j) == z[j,v],
+                name=f"flow_in_{j}_{v}")
+            
+# Constraint **
+for v in V:
+            m.addConstr(
+                quicksum(x[0,j,v] for j in N if j != 0) == 1,
+                name=f"depot_start_{j}_{v}")
+
+# Constraint **
+for v in V:
+            m.addConstr(
+                quicksum(x[i,0,v] for i in N if i != 0) == 1,
+                name=f"depot_finish_{i}_{v}")
+            
+# # Constraint **
+# for v in V:
+#     for i in N:
+#         if i != 0:
+#             m.addConstr(quicksum(x[i,j,v] for j in N if j != i) 
+#                         - quicksum(x[j,i,v] for j in N if j != i) == 0, 
+#                         name=f"arc_elimination_{i}_{v}")
         
 # Constraint 3 - Visit all nodes except the depot exactly one time
 for i in N:
@@ -189,18 +214,13 @@ m.addConstr(
 
 ## Constraints for time:
     
-# Constraint 5 - Service time starting after arrival time at node
-for v in V:
-    for i in N:
-        m.addConstr(a[i,v] <= w[i,v], name=f"service_time_{v}_at_{i}")
-
-# Constraint 6 - The vehicle doesn't stay for longer than the total time spent at the node
+# Constraint 6 - 
 for v in V:
     for i in N:
         m.addConstr(
-            w[i,v] + service_time[i]*z[i,v] <= a[i,v] + alpha[i,v], 
-            name=f"time_at_node_{i}_by_{v}")
-
+            alpha[i,v] >= service_time[i] * z[i,v], 
+            name=f"totaltime_vs_servicetime_at_{i}_by_{v}")
+    
         
 # Constraint 7 - Charging time is not longer than the total time spent at the node
 for v in V:
@@ -223,14 +243,17 @@ for v in V:
             beta[i,v] <= MC * allowed_charging[i], 
             name=f"chargestation_at_{i}_by_{v}")
 
-# Constraint 10 - Arrival time at node j cannot be earlier than the sum of arrival time at previous node and time spent there
+# Constraint 10 - Service start at node j needs to be higher than service start time at node i
+# plus service time at node i plus time spent traveling
 for v in V:
     for i in N:
         for j in N:
             if i != j:
                 m.addConstr(
-                    a[j,v] >= a[i,v] + alpha[i,v] + travel_time[i,j] - MT[i,j] * (1 - x[i,j,v]), 
-                    name=f"time_evolution_at_{j}_by_{v}")
+                    w[j,v] >= w[i,v] + alpha[i,v] + travel_time[i,j] - MT[i,j] * (1 - x[i,j,v]), 
+                    name=f"time_evolution_1_at_{j}_by_{v}")
+                
+
               
 
         
@@ -252,26 +275,7 @@ for v in V:
                 m.addConstr(
                     cb[j,v] >= cb[i,v] - discharge * travel_time[i,j] + charge * beta[j,v] - MB * (1-x[i,j,v]), 
                     name=f"battery_update_at_{j}_by_{v}")
-
-# Constraint 13 - Battery updating after traveling and charging
-for v in V:
-    for i in N:
-        for j in N:
-            if i != j:
-                m.addConstr(
-                    cb[j,v] <= cb[i,v] - discharge * travel_time[i,j] + charge * beta[j,v] + MB * (1-x[i,j,v]), 
-                    name=f"battery_update_at_{j}_by_{v}")
-        
-
-
-
-
-# Constraint 14 - Constraint for charging with respect to the maximum battery capacity
-for v in V:
-    for i in N:
-            m.addConstr(
-                cb[i,v] + charge * beta[i,v] <= maximum_battery, 
-                name=f"charging_limit_{i}_by_{v}")
+     
 
 # Constraint 15 - Charge in the battery is sufficient to reach the next node
 for v in V:
@@ -299,22 +303,7 @@ for v in V:
                 m.addConstr(
                     cl[j,v] >= cl[i,v] + pickup_volume[j] - ML * (1 - x[i,j,v]), 
                     name=f"load_value1_at_{i}_by_{v}")   
-
-# Constraint 18 - Updating load value after picking up a load
-for v in V:
-    for j in N:
-        for i in N:
-            if i != j:
-                m.addConstr(
-                    cl[j,v] <= cl[i,v] + pickup_volume[j] + ML * (1 - x[i,j,v]), 
-                    name=f"load_value2_at_{i}_by_{v}")  
-            
-# Constraint 19 - Volume after pickup does not exceed capacity
-for v in V:
-    for i in N:
-            m.addConstr(
-                cl[i,v] <= maximum_loading ,
-                name=f"capacity_limit_at_{i}_by_{v}")   
+ 
     
     
 #------------------Running model-------------------------------   
