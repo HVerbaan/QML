@@ -82,7 +82,7 @@ MB = maximum_battery + discharge*H              # Big-M for battery constraint
 MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
 for i in node_id:
     for j in node_id:
-        MT[i,j] = latest_pickup[j] + H + travel_time[i][j] - earliest_pickup[j]     
+        MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]     
 
 
 #---------------Sets----------------------
