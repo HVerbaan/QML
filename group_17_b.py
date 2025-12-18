@@ -1,4 +1,4 @@
-#=================================================================================
+#===============================================================
 # Group 17
 #===============================================================
 
@@ -56,17 +56,17 @@ latest_pickup = TSP[:,5]                        # Closing time of node i
 service_time = TSP[:,6]                         # Service time required in node i
 allowed_charging = TSP[:,7]                     # Charging at node i - binary variable (0 for no charging; 1 for available charging)
 
-# Correcting Dummy Node specifics
+# Assigning dummy node spesific columns
 pickup_volume[-1] = 0 
 service_time[-1] = 0
 allowed_charging[-1] = 0
 
 # Calculation of the euclidean distance between two nodes 
 n = len(xc)
-distance = np.zeros((n,n))                                                         # Create array for distance between nodes
+distance = np.zeros((n,n))                                                        # Creating array for distance between nodes
 for i in node_id:
     for j in node_id:
-        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Store distance between nodes
+        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Storing distance between nodes
 
 
 # Vehicle + Battery specific (choose)
@@ -78,7 +78,7 @@ maximum_battery = 110                            # Maximum battery capacity of v
 K = 4                                            # Amount of vehicles in fleet
 
 # Additional parameters
-H = latest_pickup[-1] - earliest_pickup[0]      # Operation horizon (opening hours  of the depot node)
+H = latest_pickup[-1] - earliest_pickup[0]      # Operation horizon (opening hours of the depot node)
 ML = maximum_loading                            # Big-M for pick up constraint
 MC = H                                          # Big-M for charging time constraint
 MB = maximum_battery + discharge * H            # Big-M for battery constraint
@@ -88,7 +88,7 @@ for i in node_id:
     for j in node_id:
         MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]
 
-#---------------Sets----------------------
+#------------------------Sets--------------------------------
 
 V = range(K)                                    # Set of vehicles
 N = node_id                                     # Set of all nodes
@@ -107,9 +107,9 @@ for i in N:
                 x[i,j,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="x_%s,%s,%s" %(i,j,v))
 
 
-# Variable 2 - Binary variable for if node i is visited by a vehicle or not 
+# Variable 2 - Binary variable for if customer i is visited by a vehicle or not 
 z = {}
-for i in N:
+for i in C:
     for v in V:
         z[i,v] = m.addVar(vtype=GRB.BINARY, lb=0, name="z_%s,%s" %(i,v))
       
@@ -150,14 +150,14 @@ for i in N:
         cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="Cl_%s,%s" %(i,v))
   
 
-#-------------------Objective-------------------------------
+#-------------------Objective----------------------------------
 
 # Constraint 1
 obj = (quicksum(distance[i,j] * x[i,j,v] for i in N for j in N if i != j for v in V))
 m.setObjective(obj, GRB.MINIMIZE)
 
 
-#------------------Constraints-------------------------------  
+#------------------Constraints--------------------------------- 
 
 ## Constraints for tours:
 
@@ -197,22 +197,22 @@ for v in V:
     
 # Constraint 7 - Service start time should between lower and upper bound
 for v in V:
-    for i in C:
-        m.addConstr(w[i,v] >= earliest_pickup[i] * z[i,v],
+    for i in N:
+        m.addConstr(w[i,v] >= earliest_pickup[i],
                     name=f"service_start_time_lb_{i}_{v}")
-        m.addConstr(w[i,v] <= latest_pickup[i] * z[i,v],
+        m.addConstr(w[i,v] <= latest_pickup[i],
                     name=f"service_start_time_ub_{i}_{v}")
 
 # Constraint 8 - Service cannot start before arrival
 for v in V:
-    for i in C:
+    for i in N:
         m.addConstr(a[i,v] <= w[i,v],
                     name=f"service_start_after_arrival_{i}_{v}")
 
 # Constraint 9 - Spent time at node cannot be lower than waiting time plus service time
 for v in V:
-    for i in C:
-        m.addConstr(w[i,v] + service_time[i] * z[i,v] <= a[i,v] + st[i,v],
+    for i in N:
+        m.addConstr(w[i,v] + service_time[i]  <= a[i,v] + st[i,v],
                     name=f"service_within_stay_{i}_{v}")
 
 # Constraint 10 - Spent time at node cannot be lower than charging time
@@ -223,9 +223,10 @@ for v in V:
 
 # Constraint 11 - The vehicle can only be charged if it visits to that node.
 for v in V:
-    for i in N:
+    for i in C:
         m.addConstr(ct[i,v] <= MC * z[i,v],
                     name=f"charge_only_if_visited_{i}_{v}")
+        
 
 # Constraint 12 - The vehicle can only be charged if charging is allowed at that node
 for v in V:
@@ -347,6 +348,7 @@ elif m.status == GRB.INFEASIBLE:
 else:
     print(f"\nSolver ended with status {m.status}")
     
+    
 # ----- Print results ----
 if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
 
@@ -365,7 +367,6 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
         route_details = []
         visited = set([current_node])
 
-        # --- safe route construction ---
         while current_node != end_node:
 
             next_node = None
@@ -377,7 +378,6 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
             if next_node is None:
                 break
 
-            #  loop protection
             if next_node in visited:
                 print(f"Vehicle {v+1}: loop detected at node {next_node}, stopping route trace.")
                 break
@@ -390,6 +390,7 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
             continue
 
         print(f"\nVehicle {v+1} Route:")
+        
 
         for i in route_nodes:
             arr_time = a[i, v].X
@@ -404,8 +405,7 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
                 f"Load: {load_level:.1f}, "
                 f"Battery: {batt_level:.1f}, "
                 f"Charge Time: {charge_time:.1f}, "
-                f"Charged: {charged_amount:.1f})"
-            )
+                f"Charged: {charged_amount:.1f})")
 
             route_details.append({
                 "Node": i,
@@ -415,30 +415,38 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
                 "ChargeTime": charge_time,
                 "Charged": charged_amount,
                 "x": xc[i],
-                "y": yc[i]
-            })
+                "y": yc[i]})
 
         routes_data[v] = pd.DataFrame(route_details)
 
 
+    # Node -> SOC (%) mapping
+    node_soc_label = {}
+
+    for v, df in routes_data.items():
+        for _, row in df.iterrows():
+            node = int(row["Node"])
+            soc_percent = 100.0 * row["Battery"] / maximum_battery
+            node_soc_label[node] = soc_percent
+
+
 # ----- Plotting routes -----    
     
-# --- Route Map (Color coded by Battery Level) ---
+# Route Map (Color coded by Battery Level) ---
 plt.figure(figsize=(12, 12))
     
 # Colors for vehicles
 vehicle_colors = ['tab:red', 'tab:blue', 'tab:green', 'tab:purple', 'tab:orange']
 
-# --- Plot Depot ---
+# Plot depot
 
 plt.scatter(
     xc[start_node], yc[start_node],
     c='red', s=200, marker='s',
     edgecolors='black', linewidth=1.5,
-    zorder=4, label='Depot'
-)
+    zorder=4, label='Depot')
 
-# --- Plot Nodes ---
+# Plot nodes
 
 customers_labeled = False
 charging_used_labeled = False
@@ -456,8 +464,7 @@ for i in N:
             xc[i], yc[i],
             c='gold', marker='^', s=140,
             edgecolors='black', zorder=3,
-            label='Charging Stations' if not charging_station_labeled else ""
-        )
+            label='Charging Stations' if not charging_station_labeled else "")
         charging_station_labeled = True
 
         # overlay marker if charging actually happened
@@ -466,8 +473,7 @@ for i in N:
                 xc[i], yc[i],
                 c='red', marker='*', s=220,
                 edgecolors='black', zorder=4,
-                label='Charging Used' if not charging_used_labeled else ""
-            )
+                label='Charging Used' if not charging_used_labeled else "")
             charging_used_labeled = True
 
     else:
@@ -475,13 +481,18 @@ for i in N:
             xc[i], yc[i],
             c='lightblue', marker='o', s=80,
             edgecolors='black', zorder=3,
-            label='Customers' if not customers_labeled else ""
-        )
+            label='Customers' if not customers_labeled else "")
         customers_labeled = True
 
-    plt.annotate(str(i), (xc[i] + 0.5, yc[i] + 0.5), fontsize=15)
+    #plt.annotate(str(i), (xc[i] + 0.5, yc[i] + 0.5), fontsize=15)
 
-# --- Plot Routes ---
+    plt.annotate(
+        str(i),
+        (xc[i] + 0.5, yc[i] + 0.5),
+        fontsize=12)
+
+
+# Plot routes
 
 for v, df in routes_data.items():
 
@@ -492,7 +503,7 @@ for v, df in routes_data.items():
     for i in range(len(xs) - 1):
         dx = xs[i+1] - xs[i]
         dy = ys[i+1] - ys[i]
-
+        
         plt.arrow(
             xs[i], ys[i],
             dx, dy,
@@ -502,12 +513,32 @@ for v, df in routes_data.items():
             color=color,
             linewidth=2.2,
             alpha=0.85,
-            zorder=2
-        )
+            zorder=2)
+        
+        next_node = int(df.iloc[i+1]["Node"])
+        soc = node_soc_label.get(next_node, None)
 
+        if soc is not None:
+            mid_x = (xs[i] + xs[i+1]) / 2
+            mid_y = (ys[i] + ys[i+1]) / 2
+
+            plt.text(
+                mid_x,
+                mid_y,
+                f"{soc:.0f}%",
+                fontsize=10,
+                ha="center",
+                va="center",
+                bbox=dict(
+                   facecolor="white",
+                   edgecolor="none",
+                   alpha=0.7),
+                zorder=5)
+    
     plt.plot(xs, ys, color=color, linewidth=1.8, alpha=0.6, label=f'Vehicle {v+1}')
 
-# --- Layout ---
+
+# layout
 
 plt.title("EVRPTW Routes and Charging Stations")
 plt.xlabel("X Coordinate")
@@ -516,4 +547,37 @@ plt.grid(True, alpha=0.3)
 plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
-   
+
+
+# --------- Plotting SOC % ----------------
+
+critical_soc = 20
+
+soc_profiles = {}
+
+for v, df in routes_data.items():
+    soc_percent = 100.0 * df["Battery"].to_numpy() / maximum_battery
+    soc_profiles[v] = soc_percent
+
+plt.figure(figsize=(12, 6))
+
+for v, soc in soc_profiles.items():
+    visit_order = range(len(soc))
+    plt.plot(
+        visit_order, soc,
+        marker="o", linewidth=2,
+        label=f"Vehicle {v+1}")
+
+plt.axhline(
+    y=critical_soc, linestyle="--", linewidth=2,
+    label=f"Critical SOC ({critical_soc}%)")
+
+plt.title("Vehicle SOC Profiles")
+plt.xlabel("Visit Order")
+plt.ylabel("State of Charge (%)")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="best")
+plt.tight_layout()
+plt.show()
+
+
