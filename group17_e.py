@@ -72,8 +72,6 @@ depot_row[0] = new_id
 TSP = np.vstack([TSP, depot_row])
 
 # Charging period data
-
-
 if case == 1:
     Periods = np.array([[0,    0,  350,    2],
                         [1,  350, 1020,    2],
@@ -137,62 +135,29 @@ for i in node_id:
 
 # Vehicle + Battery specific (choose)
 # Charging rate of the battery in vehicle
-charge = 1
+charge = 1.1
 # Discharging rate of the battery in vehicle
-discharge = 1
+discharge = 0.7
+discharge_diesel = 1
 # Travel cost from node i to node j
 travel_time = distance * 2
 # Maximum loading capacity of vehicle v (currently single type)
-maximum_loading = 120
+maximum_loading = 100
 # Maximum battery capacity of vehicle v
-maximum_battery = 110
-K = 4                                            # Amount of vehicles in fleet
-
-
-if case == 1:
-    K = 4                                       # Amount of vehicles in fleet
-    # Maximum loading capacity of vehicle v (currently single type)
-    maximum_loading = 120
-    maximum_battery = 110                       # Maximum battery capacity of vehicle v
-    charge = 1                                  # Charging rate of the battery in vehicle
-    # Discharging rate of the battery in vehicle
-    discharge = 1
-
-elif case == 2:
-    K = 4                                       # Amount of vehicles in fleet
-    # Maximum loading capacity of vehicle v (currently single type)
-    maximum_loading = 120
-    maximum_battery = 110                       # Maximum battery capacity of vehicle v
-    charge = 1                                  # Charging rate of the battery in vehicle
-    # Discharging rate of the battery in vehicle
-    discharge = 1
-
-elif case == 3:
-    K = 4                                       # Amount of vehicles in fleet
-    # Maximum loading capacity of vehicle v (currently single type)
-    maximum_loading = 120
-    maximum_battery = 110                       # Maximum battery capacity of vehicle v
-    charge = 1.1                                # Charging rate of the battery in vehicle
-    # Discharging rate of the battery in vehicle
-    discharge = 0.7
-
-elif case == 4:
-    K = 4                                       # Amount of vehicles in fleet
-    # Maximum loading capacity of vehicle v (currently single type)
-    maximum_loading = 120
-    maximum_battery = 90                        # Maximum battery capacity of vehicle v
-    charge = 1.1                                # Charging rate of the battery in vehicle
-    # Discharging rate of the battery in vehicle
-    discharge = 0.7
-
-elif case == 5:
-    K = 4                                       # Amount of vehicles in fleet
-    # Maximum loading capacity of vehicle v (currently single type)
-    maximum_loading = 200
-    maximum_battery = 140                       # Maximum battery capacity of vehicle v
-    charge = 1.1                                # Charging rate of the battery in vehicle
-    # Discharging rate of the battery in vehicle
-    discharge = 0.7
+maximum_battery = 90
+#amount diesel vehicles in fleet
+amount_diesel = 3
+#amount electric vehicles in fleet
+amount_electric = 3
+#fixed cost diesel vehicle when used on a day
+fixed_diesel = 100
+#fixed cost electric vehicle when used on a day
+fixed_electric = 120
+#cost per distance unit diesel vehicle
+variable_diesel = 2
+#cost per distance unit electric vehicle
+variable_electric = 1.25
+#binary variable where electric is 1 and diesel is 0
 
 
 # Additional parameters
@@ -211,7 +176,7 @@ for i in node_id:
 
 # ---------------Sets----------------------
 
-V = range(K)                                    # Set of vehicles
+V = range(amount_diesel + amount_electric)                                    # Set of vehicles
 N = node_id                                     # Set of all nodes
 C = node_id[1:-1]                               # Set of all customers
 start_node = node_id[0]
@@ -284,16 +249,27 @@ for i in N:
         for p in P:
             tw[i, v, p] = m.addVar(vtype=GRB.CONTINUOUS,
                                    lb=0, name="tw_%s,%s,%s" % (i, v, p))
+#Variable 10 - If vehicle is in use 1 otherwise 0.
+yv = {}
+for v in V:
+    yv[v] = m.addVar(vtype=GRB.BINARY, lb=0, name="yv_%s" % (v))
+
+#Variable 11 - Binary variable where electric is 1 and diesel is 0
+sv = {}
+for v in V:
+    sv[v] = m.addVar(vtype=GRB.BINARY, lb=0, name="sv_%s" % (v))
 
 
 # -------------------Objective-------------------------------
-
+print(sv[v])
 # Constraint 1
-routing_cost = quicksum(distance[i, j] * x[i, j, v]
+routing_cost = quicksum(distance[i, j] * (variable_electric * sv[v] + variable_diesel * (1 - sv[v])) * x[i, j, v] 
                         for i in N for j in N for v in V if i != j)
 charging_cost = quicksum(period_cost[p] * ct[i, v, p]
                          for i in N for v in V for p in P)
-m.setObjective(routing_cost + charging_cost, GRB.MINIMIZE)
+daily_cost = quicksum((fixed_diesel * (1-sv[v]) + fixed_electric * sv[v]) * yv[v]  
+                      for v in V)
+m.setObjective(routing_cost + charging_cost + daily_cost, GRB.MINIMIZE)
 
 # ------------------Constraints-------------------------------
 
@@ -481,7 +457,25 @@ for i in N:
             m.addConstr(
                 ct[i, v, p] <= tw[i, v, p],
                 name=f"charging_within_tw_{i}_{v}_{p}")
+            
+# Constraints for period-based charging:
 
+# Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
+for v in V: 
+    m.addConstr(
+        quicksum((1-sv[v]) * yv[v] for v in V) <= amount_diesel, name=f"max_diesel_vehicles_{v}")
+
+# Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
+for v in V: 
+    m.addConstr(quicksum(sv[v] * yv[v] for v in V) <= amount_electric, name=f"max_electric_vehicles_{v}")
+
+#Constraint 26 - DV not able to charge during trip
+for i in N:
+    for v in V:
+        for p in P:
+            m.addConstr(
+                ct[i, v, p] >= MC * sv[v] ,
+                name=f"no_charging_when_diesel_{i}_{v}_{p}")
 
 # ----- Solve ------
 
