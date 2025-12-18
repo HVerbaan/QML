@@ -74,13 +74,15 @@ else:
 
 # Node specific (from data_small)
 node_id = TSP[:,0]                              # List of id's of nodes i
-xc = TSP[:,1]                                   # X-position of nodes i
-yc = TSP[:,2]                                   # Y-position of nodes i
 pickup_volume = TSP[:,3]                        # Amount to be picked up at node i
 earliest_pickup = TSP[:,4]                      # Opening time of node i
 latest_pickup = TSP[:,5]                        # Closing time of node i
 service_time = TSP[:,6]                         # Service time required in node i
 allowed_charging = TSP[:,7]                     # Charging at node i - binary variable (0 for no charging; 1 for available charging)
+xc = TSP[:,1]                                   # X-position of nodes i
+yc = TSP[:,2]                                   # Y-position of nodes i
+
+
 
 # Correcting Dummy Node specifics
 pickup_volume[-1] = 0 
@@ -97,41 +99,41 @@ period_cost = Periods[:, 3]                     # Charging cost in period p (eur
 # Calculation of the euclidean distance between two nodes 
 n = len(xc)
 distance = np.zeros((n,n))                                                         # Create array for distance between nodes
-for i in node_id:
-    for j in node_id:
-        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Store distance between nodes
+for i in range(n):
+    for j in range(n):
+        if i != j:
+            distance[i,j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)
+        else:
+            distance[i, j] = 0    # Store distance between nodes
 
 # Vehicle + Battery specific (choose)
-# Charging rate of the battery in vehicle
-charge = 1.1
-# Discharging rate of the battery in vehicle
-discharge = 0.7
-discharge_diesel = 1
+
 # Travel cost from node i to node j
-travel_time = distance * 2
+
+travel_time = 2 * distance
+
+
+#Fixed cost per day
+W = np.array([100, 100, 100, 120, 120, 120])
+#Flexible cost per distance unit
+Q = np.array([2, 2, 2, 1.25, 1.25, 1.25])
+#Electric(0) or Diesel(1)
+K = np.array([1, 1, 1, 0, 0, 0])
+#Battery Capacity
+maximum_battery = np.array([10e10, 10e10, 10e10, 90, 90, 90])
+#Discharge rate
+discharge = np.array([1, 1, 1, 0.7, 0.7, 0.7])
+# Charging rate of the battery in vehicle
+charge = np.array([0, 0, 0, 1.1, 1.1, 1.1])
 # Maximum loading capacity of vehicle v (currently single type)
-maximum_loading = 100
-# Maximum battery capacity of vehicle v
-maximum_battery = 90
-#amount diesel vehicles in fleet
-amount_diesel = 3
-#amount electric vehicles in fleet
-amount_electric = 3
-#fixed cost diesel vehicle when used on a day
-fixed_diesel = 100
-#fixed cost electric vehicle when used on a day
-fixed_electric = 120
-#cost per distance unit diesel vehicle
-variable_diesel = 2
-#cost per distance unit electric vehicle
-variable_electric = 1.25
+maximum_loading = np.array([100,100,100,100,100,100])
 
 
 # Additional parameters
 H = latest_pickup[-1] - earliest_pickup[0]      # Operation horizon (opening hours  of the depot node)
 ML = maximum_loading                            # Big-M for pick up constraint
 MC = H                                          # Big-M for charging time constraint
-MB = maximum_battery + discharge * H            # Big-M for battery constraint
+MB = 90 + discharge * H            # Big-M for battery constraint
 
 MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
 for i in node_id:
@@ -140,12 +142,12 @@ for i in node_id:
 
 #---------------Sets----------------------
 
-V = range(K)                                    # Set of vehicles
-N = node_id                                     # Set of all nodes
+V = range(len(K))                               # Set of vehicles
+N = range(len(node_id))                                  # Set of all nodes
 C = node_id[1:-1]                               # Set of all customers
 start_node = node_id[0]
 end_node = node_id[-1]
-P = period_id                                   # Set of all charging periods
+P = range(len(period_id))                                   # Set of all charging periods
 
 #---------------------Variables-------------------------------
 
@@ -202,19 +204,14 @@ for i in N:
         for p in P:
             tw[i,v,p] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="tw_%s,%s,%s" %(i,v,p))
 
-#Variable 11 - Binary variable where electric is 1 and diesel is 0
-sv = {}
-for v in V:
-    sv[v] = m.addVar(vtype=GRB.BINARY, lb=0, name="sv_%s" % (v))
-  
 
 #-------------------Objective-------------------------------
 # Constraint 1
-routing_cost = quicksum(distance[i, j] * (variable_electric * sv[v] + variable_diesel * (1 - sv[v])) * x[i, j, v] 
+routing_cost = quicksum(distance[i, j] * Q[v] * x[i, j, v] 
                         for i in N for j in N for v in V if i != j)
 charging_cost = quicksum(period_cost[p] * ct[i, v, p]
                          for i in N for v in V for p in P)
-daily_cost = quicksum((fixed_diesel * (1-sv[v]) + fixed_electric * sv[v]) * quicksum(x[start_node,j,v] for j in C)  
+daily_cost = quicksum( W[v] * quicksum(x[start_node,j,v] for j in C)  
                       for v in V)
 m.setObjective(routing_cost + charging_cost + daily_cost, GRB.MINIMIZE)
 
@@ -300,7 +297,7 @@ for v in V:
 
 # Constraint 14 - Vehicles start at the depot with a full battery
 for v in V:
-    m.addConstr(rb[start_node,v] == maximum_battery * sv[v],
+    m.addConstr(rb[start_node,v] == maximum_battery[v],
                 name=f"battery_start_full_{v}")
     
 # Constraint 15 - Battery level must stay within lcapacity imits
@@ -308,7 +305,7 @@ for v in V:
     for i in N:
         m.addConstr(rb[i,v] >= 0,
                     name=f"battery_lb_{i}_{v}")
-        m.addConstr(rb[i,v] <= maximum_battery,
+        m.addConstr(rb[i,v] <= maximum_battery[v],
                     name=f"battery_ub_{i}_{v}")
 
 # Constraint 16 - Battery lower bound along used arcs
@@ -316,8 +313,7 @@ for v in V:
     for i in N:
         for j in N:
             if i != j:
-                m.addConstr(
-                    rb[j,v] >= rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) - discharge * travel_time[i,j] - MB * (1 - x[i,j,v] *sv[v]),
+                m.addConstr(rb[j,v] >= rb[i,v] + charge[v] * quicksum(ct[i,v,p] for p in P) - discharge[v] * travel_time[i,j] - MB[v] * (1 - x[i,j,v]),
                     name=f"battery_flow_lb_{i}_{j}_{v}")
 
 # Constraint 17 - Battery upper bound along used arcs
@@ -325,14 +321,13 @@ for v in V:
     for i in N:
         for j in N:
             if i != j:
-                m.addConstr(
-                    rb[j,v] <= rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) - discharge * travel_time[i,j] + MB * (1 - x[i,j,v] * sv[v]),
+                m.addConstr(rb[j,v] <= rb[i,v] + charge[v] * quicksum(ct[i,v,p] for p in P) - discharge[v] * travel_time[i,j] + MB[v] * (1 - x[i,j,v]),
                     name=f"battery_flow_ub_{i}_{j}_{v}")
 
 # Constraint 18 - Remaining battery plus charging cannot exceed battery capacity
 for v in V:
     for i in N:
-        m.addConstr(rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) <= maximum_battery * sv[v],
+        m.addConstr(rb[i,v] + float(charge[v]) * quicksum(ct[i,v,p] for p in P) <= maximum_battery[v] ,
                     name=f"battery_charge_capacity_{i}_{v}")
 
 
@@ -348,7 +343,7 @@ for v in V:
     for i in N:
         m.addConstr(cl[i,v] >= 0, 
                     name=f"load_lb_{i}_{v}")  #this is already defined in the variable itself we can remove
-        m.addConstr(cl[i,v] <= maximum_loading,
+        m.addConstr(cl[i,v] <= maximum_loading[v],
                     name=f"load_ub_{i}_{v}")
 
 # Constraint 21 -  Load flow lower bound when an arc is used
@@ -358,7 +353,7 @@ for v in V:
             if i != j:
                 m.addConstr(
                     cl[j,v] >= cl[i,v] + pickup_volume[j]
-                               - ML * (1 - x[i,j,v]),
+                               - ML[v] * (1 - x[i,j,v]),
                     name=f"load_flow_lb_{i}_{j}_{v}")
 
 # Constraint 22 - Load flow upper bound when an arc is used
@@ -368,7 +363,7 @@ for v in V:
             if i != j:
                 m.addConstr(
                     cl[j,v] <= cl[i,v] + pickup_volume[j]
-                               + ML * (1 - x[i,j,v]),
+                               + ML[v] * (1 - x[i,j,v]),
                     name=f"load_flow_ub_{i}_{j}_{v}")
                 
                 
@@ -378,7 +373,7 @@ for v in V:
 for i in N:
     for v in V:
         m.addConstr(
-            quicksum(tw[i, v, p] for p in P) == st[i, v] * sv[v],
+            quicksum(tw[i, v, p] for p in P) == st[i, v],
             name=f"tw_allocation_{i}_{v}")
 
 # Constraint 24 - charging within a period cannot exceed time availability
@@ -388,21 +383,7 @@ for i in N:
             m.addConstr(
                 ct[i, v, p] <= tw[i, v, p],
                 name=f"charging_within_tw_{i}_{v}_{p}")
-            
 
-# Constraints for hetrogeneous fleet:
-
-# Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
-m.addConstr(quicksum(1 - sv[v] for v in V) <= amount_diesel, name="max_diesel_vehicles")
-
-# Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
-m.addConstr(quicksum(sv[v] for v in V) <= amount_electric, name=f"max_electric_vehicles")
-
-#Constraint 26 - DV not able to charge during trip
-for i in N:
-    for v in V:
-        for p in P:
-            m.addConstr(ct[i, v, p] <= MC * sv[v], name=f"charging_for_electric_only_{i}_{v}_{p}")
 
 
 # ----- Solve ------
@@ -475,7 +456,7 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
             load_level = cl[i,v].X
             batt_level = rb[i,v].X
             charge_time = sum(ct[i,v,p].X for p in P)
-            charged_amount = charge * charge_time
+            charged_amount = charge[v] * charge_time
 
             print(
                 f" -> Node {i} "
@@ -599,9 +580,9 @@ plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
 
-print(f"Fixed cost: {daily_cost}")
-print(f"Charging cost: {charging_cost}")
-print(f"Variable cost: {routing_cost}")
+print(f"Fixed cost: {daily_cost.getValue()}")
+print(f"Charging cost: {charging_cost.getValue()}")
+print(f"Variable cost: {routing_cost.getValue()}")
 if m.status == GRB.OPTIMAL:
     print("Total cost:", m.objVal)
     print("Optimality gap:", m.MIPGap)
