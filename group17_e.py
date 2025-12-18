@@ -1,9 +1,9 @@
-# =================================================================================
+#=================================================================================
 # Group 17
-# ===============================================================
+#===============================================================
 
 
-# ----------------Imports--------------------------------
+#----------------Imports--------------------------------
 
 from gurobipy import *
 import numpy as np
@@ -11,78 +11,55 @@ import math
 import copy
 import pandas as pd
 import matplotlib.pyplot as plt
-# from matplotlib import rc
-# rc('text', usetex=True)
-# import os
-# os.environ["PATH"] += os.pathsep + '/Library/TeX/texbin'
+#from matplotlib import rc
+#rc('text', usetex=True)
+#import os
+#os.environ["PATH"] += os.pathsep + '/Library/TeX/texbin'
 
 
-# ---------------Case selection--------------------------
-
-# Choose a case here
-case = 1
+#-----------------Model creation-------------------------
 
 
-# Case 1 -   4 vehicles of 120 capacity each with a battery range of 110, charge/discharge rate of 1,
-#            uniform charging cost of 2 euros across all periods
-
-# Case 2 - 4 vehicles of 120 capacity each with a battery range of 110, charge/discharge rate of 1,
-#          charging costs in data_periodsCharge.txt
-
-# Case 3 -  4 vehicles of 120 capacity each, battery range of 110, charge rate of 1.1 and discharge rate of 0.7,
-#           charging costs in data_periodsCharge.txt
-
-# Case 4 -  4 vehicles of 120 capacity each, battery range of 90, charge rate of 1.1 and discharge rate of 0.7,
-#           charging costs in data_periodsCharge.txt
-
-# Case 5 - 4 vehicles of 200 capacity each, battery range of 140, charge rate of 1.1 and discharge rate of 0.7,
-#          charging costs in data_periodsCharge.txt
-
-
-# -----------------Model creation-------------------------
-
-
-# Create optimization model
+## Create optimization model
 m = Model('TSPmodel')
 
 
-# ---------------Extraction of data---------------------------
+#---------------Extraction of data---------------------------
 
 filename = "data_small.txt"
 
 with open(filename, "r") as f:                  # Open Li & Lim PDPTW instance definitions
     data = f.readlines()                        # Extract instance definitions
 
-# Create array for data related to nodes
-TSP = []
-# Varible to keep track of lines in data file
-i = 0
+TSP = []                                        # Create array for data related to nodes
+i = 0                                           # Varible to keep track of lines in data file
 for line in data:
     i = i+1
     words = line.split()
-    # Covert data from string to integer
-    words = [int(i) for i in words]
+    words = [int(i) for i in words]             # Covert data from string to integer
     TSP.append(words)                           # Store node data
 TSP = np.array(TSP)
 
 # Dummy node creation for depot
 depot_row = TSP[0, :].copy()
-new_id = TSP[-1, 0] + 1
+new_id = TSP[-1, 0] + 1 
 depot_row[0] = new_id
 TSP = np.vstack([TSP, depot_row])
 
 # Charging period data
+
+case = 1
 if case == 1:
-    Periods = np.array([[0,    0,  350,    2],
-                        [1,  350, 1020,    2],
-                        [2, 1020, 1320,    2],
-                        [3, 1320, 1440,    2]])
+    Periods = np.array([[   0,    0,  350,    2],
+                        [   1,  350, 1020,    2],
+                        [   2, 1020, 1320,    2],
+                        [   3, 1320, 1440,    2]])
 else:
     period_filename = "data_periodsCharge.txt"
-
+    
     with open(period_filename, "r") as f:
         period_data = f.readlines()
-
+    
     Periods = []
     i = 0
     for line in period_data:
@@ -93,45 +70,36 @@ else:
     Periods = np.array(Periods)
 
 
-# ---------------Parameters----------------
+#---------------Parameters----------------
 
 # Node specific (from data_small)
-node_id = TSP[:, 0]                              # List of id's of nodes i
-xc = TSP[:, 1]                                   # X-position of nodes i
-yc = TSP[:, 2]                                   # Y-position of nodes i
-# Amount to be picked up at node i
-pickup_volume = TSP[:, 3]
-earliest_pickup = TSP[:, 4]                      # Opening time of node i
-latest_pickup = TSP[:, 5]                        # Closing time of node i
-# Service time required in node i
-service_time = TSP[:, 6]
-# Charging at node i - binary variable (0 for no charging; 1 for available charging)
-allowed_charging = TSP[:, 7]
+node_id = TSP[:,0]                              # List of id's of nodes i
+xc = TSP[:,1]                                   # X-position of nodes i
+yc = TSP[:,2]                                   # Y-position of nodes i
+pickup_volume = TSP[:,3]                        # Amount to be picked up at node i
+earliest_pickup = TSP[:,4]                      # Opening time of node i
+latest_pickup = TSP[:,5]                        # Closing time of node i
+service_time = TSP[:,6]                         # Service time required in node i
+allowed_charging = TSP[:,7]                     # Charging at node i - binary variable (0 for no charging; 1 for available charging)
 
 # Correcting Dummy Node specifics
-pickup_volume[-1] = 0
+pickup_volume[-1] = 0 
 service_time[-1] = 0
 allowed_charging[-1] = 0
 
 # Charging period specific (from data_periodsCharge)
-# ID number of charging period p
-period_id = Periods[:, 0]
-# Start time of charging period p
-period_start = Periods[:, 1]
+period_id = Periods[:, 0]                       # ID number of charging period p
+period_start = Periods[:, 1]                    # Start time of charging period p
 period_end = Periods[:, 2]                      # End time of charging period p
-# Charging cost in period p (euro / time unit)
-period_cost = Periods[:, 3]
+period_cost = Periods[:, 3]                     # Charging cost in period p (euro / time unit)
 
 
-# Calculation of the euclidean distance between two nodes
+# Calculation of the euclidean distance between two nodes 
 n = len(xc)
-# Create array for distance between nodes
-distance = np.zeros((n, n))
+distance = np.zeros((n,n))                                                         # Create array for distance between nodes
 for i in node_id:
     for j in node_id:
-        # Store distance between nodes
-        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)
-
+        distance[i][j] = math.sqrt((xc[j] - xc[i])**2 + (yc[j] - yc[i])**2)       # Store distance between nodes
 
 # Vehicle + Battery specific (choose)
 # Charging rate of the battery in vehicle
@@ -157,194 +125,164 @@ fixed_electric = 120
 variable_diesel = 2
 #cost per distance unit electric vehicle
 variable_electric = 1.25
-#binary variable where electric is 1 and diesel is 0
 
 
 # Additional parameters
-# Operation horizon (opening hours  of the depot node)
-H = latest_pickup[-1] - earliest_pickup[0]
+H = latest_pickup[-1] - earliest_pickup[0]      # Operation horizon (opening hours  of the depot node)
 ML = maximum_loading                            # Big-M for pick up constraint
 MC = H                                          # Big-M for charging time constraint
 MB = maximum_battery + discharge * H            # Big-M for battery constraint
 
-# Calculate big-M for each arc [i,j] for time evolution constraint
-MT = np.zeros((n, n))
+MT = np.zeros((n,n))                            # Calculate big-M for each arc [i,j] for time evolution constraint
 for i in node_id:
     for j in node_id:
-        MT[i, j] = latest_pickup[j] + H + \
-            travel_time[i, j] - earliest_pickup[j]
+        MT[i,j] = latest_pickup[j] + H + travel_time[i,j] - earliest_pickup[j]
 
-# ---------------Sets----------------------
+#---------------Sets----------------------
 
-V = range(amount_diesel + amount_electric)                                    # Set of vehicles
+V = range(K)                                    # Set of vehicles
 N = node_id                                     # Set of all nodes
 C = node_id[1:-1]                               # Set of all customers
 start_node = node_id[0]
 end_node = node_id[-1]
 P = period_id                                   # Set of all charging periods
 
-# ---------------------Variables-------------------------------
+#---------------------Variables-------------------------------
 
-# Variable 1 - Binary variable for the route (i, j) being in the solution space for vehicle v
+# Variable 1 - Binary variable for the route (i, j) being in the solution space for vehicle v 
 x = {}
 for i in N:
     for j in N:
         if i != j:
             for v in V:
-                x[i, j, v] = m.addVar(
-                    vtype=GRB.BINARY, lb=0, name="x_%s,%s,%s" % (i, j, v))
+                x[i,j,v] = m.addVar(vtype=GRB.BINARY, lb = 0, name="x_%s,%s,%s" %(i,j,v))
 
-
-# Variable 2 - Binary variable for if node i is visited by a vehicle or not
-z = {}
-for i in N:
-    for v in V:
-        z[i, v] = m.addVar(vtype=GRB.BINARY, lb=0, name="z_%s,%s" % (i, v))
-
+      
 # Variable 3 - Arrival time of vehicle v at node i
 a = {}
 for i in N:
     for v in V:
-        a[i, v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="a_%s,%s" % (i, v))
-
+        a[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="a_%s,%s" %(i,v))
+        
 # Variable 4 - Start time of service of vehicle v at node i
 w = {}
 for i in N:
     for v in V:
-        w[i, v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="w_%s,%s" % (i, v))
+        w[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="w_%s,%s" %(i,v))
 
 # Variable 5 - Total time spent at node i by vehicle v
 st = {}
 for i in N:
     for v in V:
-        st[i, v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0,
-                            name="st_%s,%s" % (i, v))
+        st[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="st_%s,%s" %(i,v))
 
 # Variable 6 - Charging time at node i by vehicle v
 ct = {}
 for i in N:
     for v in V:
         for p in P:
-            ct[i, v, p] = m.addVar(vtype=GRB.CONTINUOUS,
-                                   lb=0, name="ct_%s,%s,%s" % (i, v, p))
+            ct[i,v,p] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="ct_%s,%s,%s" %(i,v,p))
 
 # Variable 7 - Remaining battery level of vehicle v at node i
 rb = {}
 for i in N:
     for v in V:
-        rb[i, v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0,
-                            name="cb_%s,%s" % (i, v))
+        rb[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="cb_%s,%s" %(i,v))
 
 # Variable 8 - Current load volume of vehicle v after visiting node i
 cl = {}
 for i in N:
     for v in V:
-        cl[i, v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0,
-                            name="cl_%s,%s" % (i, v))
+        cl[i,v] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="cl_%s,%s" %(i,v))
 
 # Variable 9 - Available time window of vehicle v at node i during charging period p
 tw = {}
 for i in N:
     for v in V:
         for p in P:
-            tw[i, v, p] = m.addVar(vtype=GRB.CONTINUOUS,
-                                   lb=0, name="tw_%s,%s,%s" % (i, v, p))
-#Variable 10 - If vehicle is in use 1 otherwise 0.
-yv = {}
-for v in V:
-    yv[v] = m.addVar(vtype=GRB.BINARY, lb=0, name="yv_%s" % (v))
+            tw[i,v,p] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="tw_%s,%s,%s" %(i,v,p))
 
 #Variable 11 - Binary variable where electric is 1 and diesel is 0
 sv = {}
 for v in V:
     sv[v] = m.addVar(vtype=GRB.BINARY, lb=0, name="sv_%s" % (v))
+  
 
-
-# -------------------Objective-------------------------------
-print(sv[v])
+#-------------------Objective-------------------------------
 # Constraint 1
 routing_cost = quicksum(distance[i, j] * (variable_electric * sv[v] + variable_diesel * (1 - sv[v])) * x[i, j, v] 
                         for i in N for j in N for v in V if i != j)
 charging_cost = quicksum(period_cost[p] * ct[i, v, p]
                          for i in N for v in V for p in P)
-daily_cost = quicksum((fixed_diesel * (1-sv[v]) + fixed_electric * sv[v]) * yv[v]  
+daily_cost = quicksum((fixed_diesel * (1-sv[v]) + fixed_electric * sv[v]) * quicksum(x[start_node,j,v] for j in C)  
                       for v in V)
 m.setObjective(routing_cost + charging_cost + daily_cost, GRB.MINIMIZE)
 
-# ------------------Constraints-------------------------------
+#------------------Constraints-------------------------------  
 
-# Constraints for tours:
+## Constraints for tours:
 
-# Constraint 2 - Each node only one outgoing arc
+# Constraint 2 - Each node only one outgoing arc and incoming arc
 for v in V:
     for i in C:
-        m.addConstr(quicksum(x[i, j, v] for j in N if j != i) == z[i, v],
+        m.addConstr(quicksum(x[i,j,v] for j in N if j != i) == quicksum(x[j,i,v] for j in N if j != i), 
                     name=f"flow_out_{i}_{v}")
 
-# Constraint 3 - Each node only one incoming arc
-for v in V:
-    for j in C:
-        m.addConstr(
-            quicksum(x[i, j, v] for i in N if i != j) == z[j, v],
-            name=f"flow_in_{j}_{v}")
-
+        
 # Constraint 4 - Each customer is visited exactly one time
 for i in C:
-    m.addConstr(
-        quicksum(z[i, v] for v in V) == 1,
-        name=f"visit_once_{i}")
+        m.addConstr(quicksum(x[j,i,v] for j in N if j != i for v in V) == 1)
 
 # Constraint 5 - Depot outflow
 for v in V:
     m.addConstr(
-        quicksum(x[start_node, j, v] for j in N if j != start_node) == 1,
+        quicksum(x[start_node,j,v] for j in C) <= 1,
         name=f"depot_start_{v}")
 
 # Constraint 6 - Depot inflow
 for v in V:
     m.addConstr(
-        quicksum(x[i, end_node, v] for i in N if i != end_node) == 1,
+        quicksum(x[i,end_node,v] for i in C) == quicksum(x[start_node,j,v] for j in C),
         name=f"depot_end_{v}")
+    
 
-
-# Constraints for time:
-
+## Constraints for time:
+    
 # Constraint 7 - Service start time should between lower and upper bound
 for v in V:
     for i in C:
-        m.addConstr(w[i, v] >= earliest_pickup[i] * z[i, v],
+        m.addConstr(w[i,v] >= earliest_pickup[i] * quicksum(x[i,j,v] for j in N if j != i),
                     name=f"service_start_time_lb_{i}_{v}")
-        m.addConstr(w[i, v] <= latest_pickup[i] * z[i, v],
-                    name=f"service_start_time_ub_{i}_{v}")
+        m.addConstr(w[i,v] <= latest_pickup[i] * quicksum(x[i,j,v] for j in N if j != i), name=f"service_start_time_ub_{i}_{v}")
 
 # Constraint 8 - Service cannot start before arrival
 for v in V:
     for i in C:
-        m.addConstr(a[i, v] <= w[i, v],
+        m.addConstr(a[i,v] <= w[i,v],
                     name=f"service_start_after_arrival_{i}_{v}")
 
 # Constraint 9 - Spent time at node cannot be lower than waiting time plus service time
 for v in V:
     for i in C:
-        m.addConstr(w[i, v] + service_time[i] * z[i, v] <= a[i, v] + st[i, v],
+        m.addConstr(w[i,v] + service_time[i] * quicksum(x[i,j,v] for j in N if j != i) <= a[i,v] + st[i,v],
                     name=f"service_within_stay_{i}_{v}")
 
 # Constraint 10 - Spent time at node cannot be lower than charging time
 for v in V:
     for i in N:
-        m.addConstr(st[i, v] >= quicksum(ct[i, v, p] for p in P),
+        m.addConstr(st[i,v] >= quicksum(ct[i,v,p] for p in P),
                     name=f"charge_within_stay_{i}_{v}")
 
 # Constraint 11 - The vehicle can only be charged if it visits to that node.
 for v in V:
     for i in N:
-        m.addConstr(quicksum(ct[i, v, p] for p in P) <= MC * z[i, v],
+        m.addConstr(quicksum(ct[i,v,p] for p in P) <= MC * quicksum(x[i,j,v] for j in N if j != i),
                     name=f"charge_only_if_visited_{i}_{v}")
 
 # Constraint 12 - The vehicle can only be charged if charging is allowed at that node
 for v in V:
     for i in N:
-        m.addConstr(quicksum(ct[i, v, p] for p in P) <= MC * allowed_charging[i],
+        m.addConstr(quicksum(ct[i,v,p] for p in P) <= MC * allowed_charging[i],
                     name=f"charge_allowed_{i}_{v}")
 
 # Constraint 13 - Time consistency along the route
@@ -353,24 +291,24 @@ for v in V:
         for j in N:
             if i != j:
                 m.addConstr(
-                    a[j, v] >= a[i, v] + st[i, v] + travel_time[i, j]
-                    - MT[i, j] * (1 - x[i, j, v]),
+                    a[j,v] >= a[i,v] + st[i,v] + travel_time[i,j]
+                              - MT[i,j] * (1 - x[i,j,v]),
                     name=f"time_flow_{i}_{j}_{v}")
+                
 
-
-# Battery constraints:
+## Battery constraints:
 
 # Constraint 14 - Vehicles start at the depot with a full battery
 for v in V:
-    m.addConstr(rb[start_node, v] == maximum_battery,
+    m.addConstr(rb[start_node,v] == maximum_battery * sv[v],
                 name=f"battery_start_full_{v}")
-
+    
 # Constraint 15 - Battery level must stay within lcapacity imits
 for v in V:
     for i in N:
-        m.addConstr(rb[i, v] >= 0,
+        m.addConstr(rb[i,v] >= 0,
                     name=f"battery_lb_{i}_{v}")
-        m.addConstr(rb[i, v] <= maximum_battery,
+        m.addConstr(rb[i,v] <= maximum_battery,
                     name=f"battery_ub_{i}_{v}")
 
 # Constraint 16 - Battery lower bound along used arcs
@@ -379,10 +317,7 @@ for v in V:
         for j in N:
             if i != j:
                 m.addConstr(
-                    rb[j, v] >= rb[i, v]
-                    + charge * quicksum(ct[i, v, p] for p in P)
-                    - discharge * travel_time[i, j]
-                    - MB * (1 - x[i, j, v]),
+                    rb[j,v] >= rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) - discharge * travel_time[i,j] - MB * (1 - x[i,j,v] *sv[v]),
                     name=f"battery_flow_lb_{i}_{j}_{v}")
 
 # Constraint 17 - Battery upper bound along used arcs
@@ -391,33 +326,29 @@ for v in V:
         for j in N:
             if i != j:
                 m.addConstr(
-                    rb[j, v] <= rb[i, v]
-                    + charge * quicksum(ct[i, v, p] for p in P)
-                    - discharge * travel_time[i, j]
-                    + MB * (1 - x[i, j, v]),
+                    rb[j,v] <= rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) - discharge * travel_time[i,j] + MB * (1 - x[i,j,v] * sv[v]),
                     name=f"battery_flow_ub_{i}_{j}_{v}")
 
 # Constraint 18 - Remaining battery plus charging cannot exceed battery capacity
 for v in V:
     for i in N:
-        m.addConstr(rb[i, v] + charge * quicksum(ct[i, v, p] for p in P) <= maximum_battery,
+        m.addConstr(rb[i,v] + charge * quicksum(ct[i,v,p] for p in P) <= maximum_battery * sv[v],
                     name=f"battery_charge_capacity_{i}_{v}")
 
 
-# Constraints for vehicle picking up loads:
+## Constraints for vehicle picking up loads:
 
 # Constraint 19 - Vehicles start empty at the depot
 for v in V:
-    m.addConstr(cl[start_node, v] == 0,
+    m.addConstr(cl[start_node,v] == 0,
                 name=f"load_start_zero_{v}")
-
+    
 # Constraint 20 - Vehicle load must stay within capacity bounds
 for v in V:
     for i in N:
-        m.addConstr(cl[i, v] >= 0,
-                    # this is already defined in the variable itself we can remove
-                    name=f"load_lb_{i}_{v}")
-        m.addConstr(cl[i, v] <= maximum_loading,
+        m.addConstr(cl[i,v] >= 0, 
+                    name=f"load_lb_{i}_{v}")  #this is already defined in the variable itself we can remove
+        m.addConstr(cl[i,v] <= maximum_loading,
                     name=f"load_ub_{i}_{v}")
 
 # Constraint 21 -  Load flow lower bound when an arc is used
@@ -426,8 +357,8 @@ for v in V:
         for j in N:
             if i != j:
                 m.addConstr(
-                    cl[j, v] >= cl[i, v] + pickup_volume[j]
-                    - ML * (1 - x[i, j, v]),
+                    cl[j,v] >= cl[i,v] + pickup_volume[j]
+                               - ML * (1 - x[i,j,v]),
                     name=f"load_flow_lb_{i}_{j}_{v}")
 
 # Constraint 22 - Load flow upper bound when an arc is used
@@ -436,18 +367,18 @@ for v in V:
         for j in N:
             if i != j:
                 m.addConstr(
-                    cl[j, v] <= cl[i, v] + pickup_volume[j]
-                    + ML * (1 - x[i, j, v]),
+                    cl[j,v] <= cl[i,v] + pickup_volume[j]
+                               + ML * (1 - x[i,j,v]),
                     name=f"load_flow_ub_{i}_{j}_{v}")
-
-
-# Constraints for period-based charging:
+                
+                
+## Constraints for period-based charging:
 
 # Constraint 23 - charging time allocation across periods
 for i in N:
     for v in V:
         m.addConstr(
-            quicksum(tw[i, v, p] for p in P) == st[i, v],
+            quicksum(tw[i, v, p] for p in P) == st[i, v] * sv[v],
             name=f"tw_allocation_{i}_{v}")
 
 # Constraint 24 - charging within a period cannot exceed time availability
@@ -458,24 +389,21 @@ for i in N:
                 ct[i, v, p] <= tw[i, v, p],
                 name=f"charging_within_tw_{i}_{v}_{p}")
             
-# Constraints for period-based charging:
+
+# Constraints for hetrogeneous fleet:
 
 # Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
-for v in V: 
-    m.addConstr(
-        quicksum((1-sv[v]) * yv[v] for v in V) <= amount_diesel, name=f"max_diesel_vehicles_{v}")
+m.addConstr(quicksum(1 - sv[v] for v in V) <= amount_diesel, name="max_diesel_vehicles")
 
 # Constraint 25 - Max amount of vehicles on the road should be equal to the available vehicles.
-for v in V: 
-    m.addConstr(quicksum(sv[v] * yv[v] for v in V) <= amount_electric, name=f"max_electric_vehicles_{v}")
+m.addConstr(quicksum(sv[v] for v in V) <= amount_electric, name=f"max_electric_vehicles")
 
 #Constraint 26 - DV not able to charge during trip
 for i in N:
     for v in V:
         for p in P:
-            m.addConstr(
-                ct[i, v, p] >= MC * sv[v] ,
-                name=f"no_charging_when_diesel_{i}_{v}_{p}")
+            m.addConstr(ct[i, v, p] <= MC * sv[v], name=f"charging_for_electric_only_{i}_{v}_{p}")
+
 
 # ----- Solve ------
 
@@ -493,11 +421,11 @@ elif m.status == GRB.INFEASIBLE:
     m.computeIIS()
     m.write("model.ilp")
     print("IIS written to model.ilp")
-    pass
+    pass 
 
 else:
     print(f"\nSolver ended with status {m.status}")
-
+    
 # ----- Print results ----
 if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
 
@@ -530,8 +458,7 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
 
             #  loop protection
             if next_node in visited:
-                print(
-                    f"Vehicle {v+1}: loop detected at node {next_node}, stopping route trace.")
+                print(f"Vehicle {v+1}: loop detected at node {next_node}, stopping route trace.")
                 break
 
             visited.add(next_node)
@@ -544,10 +471,10 @@ if m.status in (GRB.OPTIMAL, GRB.TIME_LIMIT):
         print(f"\nVehicle {v+1} Route:")
 
         for i in route_nodes:
-            arr_time = a[i, v].X
-            load_level = cl[i, v].X
-            batt_level = rb[i, v].X
-            charge_time = sum(ct[i, v, p].X for p in P)
+            arr_time = a[i,v].X
+            load_level = cl[i,v].X
+            batt_level = rb[i,v].X
+            charge_time = sum(ct[i,v,p].X for p in P)
             charged_amount = charge * charge_time
 
             print(
@@ -577,14 +504,13 @@ if m.status not in (GRB.OPTIMAL, GRB.TIME_LIMIT):
     raise SystemExit
 
 
-# ----- Plotting routes -----
-
+# ----- Plotting routes -----    
+    
 # --- Route Map (Color coded by Battery Level) ---
 plt.figure(figsize=(12, 12))
-
+    
 # Colors for vehicles
-vehicle_colors = ['tab:red', 'tab:blue',
-                  'tab:green', 'tab:purple', 'tab:orange']
+vehicle_colors = ['tab:red', 'tab:blue', 'tab:green', 'tab:purple', 'tab:orange']
 
 # --- Plot Depot ---
 
@@ -602,8 +528,8 @@ charging_station_labeled = False
 
 for i in N:
     if i == start_node or i == end_node:
-        continue
-
+        continue 
+    
     # checking if charging happened at node i
     charged_here = sum(ct[i, v, p].X for v in V for p in P) > 1e-6
 
@@ -661,8 +587,7 @@ for v, df in routes_data.items():
             zorder=2
         )
 
-    plt.plot(xs, ys, color=color, linewidth=1.8,
-             alpha=0.6, label=f'Vehicle {v+1}')
+    plt.plot(xs, ys, color=color, linewidth=1.8, alpha=0.6, label=f'Vehicle {v+1}')
 
 # --- Layout ---
 
@@ -673,3 +598,11 @@ plt.grid(True, alpha=0.3)
 plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
+
+print(f"Fixed cost: {daily_cost}")
+print(f"Charging cost: {charging_cost}")
+print(f"Variable cost: {routing_cost}")
+if m.status == GRB.OPTIMAL:
+    print("Total cost:", m.objVal)
+    print("Optimality gap:", m.MIPGap)
+    print("Computation time [seconds]:", m.Runtime)
