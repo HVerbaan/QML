@@ -1,0 +1,23 @@
+\ Model TSPmodel_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0xbe11e173004fb7bc
+Minimize
+ 
+Subject To
+ battery_start_full_0: cb_0,0 + 1008 sv_0 = 1098
+ battery_start_full_1: cb_0,1 + 1008 sv_1 = 1098
+ battery_start_full_4: cb_0,4 + 1008 sv_4 = 1098
+ battery_start_full_5: cb_0,5 + 1008 sv_5 = 1098
+ battery_ub_0_0: cb_0,0 <= 90
+ battery_ub_0_1: cb_0,1 <= 90
+ battery_ub_0_4: cb_0,4 <= 90
+ battery_ub_0_5: cb_0,5 <= 90
+ max_electric_vehicles: sv_0 + sv_1 + sv_2 + sv_3 + sv_4 + sv_5 <= 3
+Bounds
+ cb_0,0 free
+ cb_0,1 free
+ cb_0,4 free
+ cb_0,5 free
+Binaries
+ sv_0 sv_1 sv_2 sv_3 sv_4 sv_5
+End
