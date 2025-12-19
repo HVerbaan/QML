@@ -120,7 +120,7 @@ Q = np.array([2, 2, 2, 1.25, 1.25, 1.25])
 #Electric(0) or Diesel(1)
 K = np.array([1, 1, 1, 0, 0, 0])
 #Battery Capacity
-maximum_battery = np.array([0, 0, 0, 90, 90, 90])
+maximum_battery = np.array([10e10, 10e10, 10e10, 90, 90, 90])
 #Discharge rate
 discharge = np.array([0, 0, 0, 0.7, 0.7, 0.7])
 # Charging rate of the battery in vehicle
